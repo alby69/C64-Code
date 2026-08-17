@@ -1,0 +1,14 @@
+name: editor
+display_name: "C64-Code — READYCode-Py"
+version: "0.1.0"
+sdk_api_version: "1"
+description: "Tokenizer, diskimage, bridge VICE/Ultimate e tooling per l'editor dell'SDK."
+entry_points:
+  cli: "readycode_py:main"
+capabilities:
+  - tokenizer
+  - diskimage
+  - vice-bridge
+  - petscii
+requires_python: ">=3.8"
+standalone: true
