@@ -11,6 +11,14 @@ import os
 import json
 import argparse
 import asyncio
+from typing import Tuple
+
+from .tokenizer import PrgConverter
+from .diskimage import DiskImage, DiskGeometry, C64UFileKind
+from .transform import CodeMinifier, CodePrettifier
+from .petscii import to_screen_code
+from .ultimate_client import C64UltimateClient
+from .vice_client import ViceClient
 
 
 def _read_text(path: str) -> str:
@@ -36,7 +44,6 @@ def _write_text(path: str, data: str):
 # ── tokenize ──────────────────────────────────────────────────────────
 
 def cmd_tokenize(args):
-    from .tokenizer import PrgConverter
     source = _read_text(args.input)
     converter = PrgConverter()
     prg = converter.convert_to_prg(source)
@@ -47,7 +54,6 @@ def cmd_tokenize(args):
 # ── detokenize ────────────────────────────────────────────────────────
 
 def cmd_detokenize(args):
-    from .tokenizer import PrgConverter
     data = _read_bytes(args.input)
     converter = PrgConverter()
     if not converter.is_basic_program(data):
@@ -75,12 +81,15 @@ def _load_image(path: str) -> bytes:
     return data
 
 
+def _get_disk_context(image_path: str) -> Tuple[bytes, DiskGeometry, DiskImage]:
+    data = _load_image(image_path)
+    fmt = _detect_format(image_path)
+    geo = DiskGeometry.D81 if fmt == "d81" else DiskGeometry.D64
+    return data, geo, DiskImage(geo)
+
+
 def cmd_disk_list(args):
-    from .diskimage import DiskImage, DiskGeometry, C64UFileKind
-    data = _load_image(args.image)
-    fmt = _detect_format(args.image)
-    geo = DiskGeometry.D64 if fmt == "d64" else DiskGeometry.D81
-    img = DiskImage(geo)
+    data, _, img = _get_disk_context(args.image)
     entries = img.read_directory(data)
 
     if args.json:
@@ -97,11 +106,7 @@ def cmd_disk_list(args):
 
 
 def cmd_disk_extract(args):
-    from .diskimage import DiskImage, DiskGeometry
-    data = _load_image(args.image)
-    fmt = _detect_format(args.image)
-    geo = DiskGeometry.D64 if fmt == "d64" else DiskGeometry.D81
-    img = DiskImage(geo)
+    data, _, img = _get_disk_context(args.image)
     entries = img.read_directory(data)
     target = args.name.upper()
 
@@ -117,11 +122,7 @@ def cmd_disk_extract(args):
 
 
 def cmd_disk_inject(args):
-    from .diskimage import DiskImage, DiskGeometry, C64UFileKind
-    data = _load_image(args.image)
-    fmt = _detect_format(args.image)
-    geo = DiskGeometry.D64 if fmt == "d64" else DiskGeometry.D81
-    img = DiskImage(geo)
+    data, _, img = _get_disk_context(args.image)
     content = _read_bytes(args.file)
     name = args.name or os.path.splitext(os.path.basename(args.file))[0]
 
@@ -131,9 +132,8 @@ def cmd_disk_inject(args):
 
 
 def cmd_disk_create(args):
-    from .diskimage import DiskImage, DiskGeometry
     fmt = args.format or "d64"
-    geo = DiskGeometry.D64 if fmt == "d64" else DiskGeometry.D81
+    geo = DiskGeometry.D81 if fmt == "d81" else DiskGeometry.D64
     img = DiskImage(geo)
     blank = img.create_blank_image(args.name or "UNTITLED")
     _write_bytes(args.output, blank)
@@ -141,22 +141,14 @@ def cmd_disk_create(args):
 
 
 def cmd_disk_delete(args):
-    from .diskimage import DiskImage, DiskGeometry
-    data = _load_image(args.image)
-    fmt = _detect_format(args.image)
-    geo = DiskGeometry.D64 if fmt == "d64" else DiskGeometry.D81
-    img = DiskImage(geo)
+    data, _, img = _get_disk_context(args.image)
     new_image = img.delete_entry(data, args.name)
     _write_bytes(args.image, new_image)
     print(f"[OK] Deleted '{args.name}' from {args.image}")
 
 
 def cmd_disk_rename(args):
-    from .diskimage import DiskImage, DiskGeometry
-    data = _load_image(args.image)
-    fmt = _detect_format(args.image)
-    geo = DiskGeometry.D64 if fmt == "d64" else DiskGeometry.D81
-    img = DiskImage(geo)
+    data, _, img = _get_disk_context(args.image)
     new_image = img.rename_entry(data, args.name, args.new_name)
     _write_bytes(args.image, new_image)
     print(f"[OK] Renamed '{args.name}' → '{args.new_name}' on {args.image}")
@@ -165,7 +157,6 @@ def cmd_disk_rename(args):
 # ── minify / prettify ─────────────────────────────────────────────────
 
 def cmd_minify(args):
-    from .transform import CodeMinifier
     source = _read_text(args.input)
     result = CodeMinifier.minify(
         source,
@@ -184,7 +175,6 @@ def cmd_minify(args):
 
 
 def cmd_prettify(args):
-    from .transform import CodePrettifier
     source = _read_text(args.input)
     result = CodePrettifier.prettify(
         source,
@@ -203,7 +193,6 @@ def cmd_prettify(args):
 # ── petscii ───────────────────────────────────────────────────────────
 
 def cmd_petscii(args):
-    from .petscii import to_screen_code
     value = args.value
     if value.startswith("$"):
         petscii = int(value[1:], 16)
@@ -216,7 +205,6 @@ def cmd_petscii(args):
 # ── bridge (C64U / VICE) ─────────────────────────────────────────────
 
 def cmd_bridge_c64u(args):
-    from .ultimate_client import C64UltimateClient
     client = C64UltimateClient()
 
     async def _run():
@@ -239,8 +227,6 @@ def cmd_bridge_c64u(args):
 
 
 def cmd_bridge_vice(args):
-    from .vice_client import ViceClient
-
     async def _run():
         client = ViceClient(args.host, args.port)
         if args.action == "run":

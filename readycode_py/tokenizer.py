@@ -482,3 +482,11 @@ class PrgConverter:
             i += 1
 
         return line_number, line[i:] if i < len(line) else ""
+
+
+_DEFAULT_PRG_CONVERTER = PrgConverter()
+
+
+def is_basic_program(data: bytes) -> bool:
+    """Check if the given binary data is a valid C64 BASIC program."""
+    return _DEFAULT_PRG_CONVERTER.is_basic_program(data)

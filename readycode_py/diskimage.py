@@ -7,7 +7,7 @@ Reads the directory and file contents of a CBM DOS disk image (.d64 or .d81).
 
 from enum import Enum, auto
 from typing import List, Tuple, Optional
-from .tokenizer import PrgConverter
+from .tokenizer import is_basic_program
 
 class C64UFileKind(Enum):
     Folder = auto()
@@ -51,7 +51,7 @@ class DiskGeometry:
 
 
 # Standard 1541 Disk Geometry
-DiskGeometry.D64 = DiskGeometry(
+GEOMETRY_D64 = DiskGeometry(
     sectors_per_track=[
         0, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
            19, 19, 19, 19, 19, 19, 19,
@@ -66,7 +66,7 @@ DiskGeometry.D64 = DiskGeometry(
 )
 
 # Standard 1581 Disk Geometry
-DiskGeometry.D81 = DiskGeometry(
+GEOMETRY_D81 = DiskGeometry(
     sectors_per_track=DiskGeometry._build_uniform(80, 40),
     directory_track=40,
     directory_sector=3,
@@ -74,6 +74,10 @@ DiskGeometry.D81 = DiskGeometry(
     max_chain_steps=3300,
     disk_format=DiskFormat.D81
 )
+
+# Backward compatibility class attributes
+DiskGeometry.D64 = GEOMETRY_D64
+DiskGeometry.D81 = GEOMETRY_D81
 
 
 class D64Entry:
@@ -90,9 +94,9 @@ class DiskImage:
     @classmethod
     def for_kind(cls, kind: C64UFileKind) -> 'DiskImage':
         if kind == C64UFileKind.D64:
-            return cls(DiskGeometry.D64)
+            return cls(GEOMETRY_D64)
         elif kind == C64UFileKind.D81:
-            return cls(DiskGeometry.D81)
+            return cls(GEOMETRY_D81)
         else:
             raise ValueError(f"{kind} is not a disk image kind.")
 
@@ -127,7 +131,7 @@ class DiskImage:
                 content = self._read_file_chain(disk_image, file_track, file_sector)
 
                 is_prg_type = (type_byte & 0x0F) == 2
-                is_basic = is_prg_type and PrgConverter().is_basic_program(content)
+                is_basic = is_prg_type and is_basic_program(content)
 
                 entries.append(D64Entry(
                     name=name,
@@ -431,62 +435,34 @@ class DiskImage:
 
     def _write_header(self, disk_image: bytearray, disk_name: str):
         name_bytes = self._encode_name(disk_name, 16)
-        disk_id = [ord('0'), ord('1')]
+        disk_id = b"01"
+        dir_tr = self._geometry.directory_track
+        dir_sec = self._geometry.directory_sector
 
         if self._geometry.disk_format == DiskFormat.D64:
-            bam_offset = self._sector_offset(self._geometry.directory_track, 0)
-            disk_image[bam_offset + 0x00] = self._geometry.directory_track & 0xFF
-            disk_image[bam_offset + 0x01] = self._geometry.directory_sector & 0xFF
-            disk_image[bam_offset + 0x02] = ord('A')
-            disk_image[bam_offset + 0x03] = 0
-            disk_image[bam_offset + 0x90 : bam_offset + 0xA0] = name_bytes
-            disk_image[bam_offset + 0xA0] = 0xA0
-            disk_image[bam_offset + 0xA1] = 0xA0
-            disk_image[bam_offset + 0xA2] = disk_id[0]
-            disk_image[bam_offset + 0xA3] = disk_id[1]
-            disk_image[bam_offset + 0xA4] = 0xA0
-            disk_image[bam_offset + 0xA5] = ord('2')
-            disk_image[bam_offset + 0xA6] = ord('A')
-            disk_image[bam_offset + 0xA7] = 0xA0
-            disk_image[bam_offset + 0xA8] = 0xA0
-            disk_image[bam_offset + 0xA9] = 0xA0
-            disk_image[bam_offset + 0xAA] = 0xA0
+            bam_offset = self._sector_offset(dir_tr, 0)
+            disk_image[bam_offset + 0x00:bam_offset + 0x04] = bytes([dir_tr, dir_sec, ord('A'), 0])
+            disk_image[bam_offset + 0x90:bam_offset + 0xA0] = name_bytes
+            disk_image[bam_offset + 0xA0:bam_offset + 0xAB] = bytes([
+                0xA0, 0xA0, disk_id[0], disk_id[1], 0xA0, ord('2'), ord('A'), 0xA0, 0xA0, 0xA0, 0xA0
+            ])
         else:
-            header_offset = self._sector_offset(self._geometry.directory_track, 0)
-            disk_image[header_offset + 0x00] = self._geometry.directory_track & 0xFF
-            disk_image[header_offset + 0x01] = self._geometry.directory_sector & 0xFF
-            disk_image[header_offset + 0x02] = ord('D')
-            disk_image[header_offset + 0x03] = 0
-            disk_image[header_offset + 0x04 : header_offset + 0x14] = name_bytes
-            disk_image[header_offset + 0x14] = 0xA0
-            disk_image[header_offset + 0x15] = 0xA0
-            disk_image[header_offset + 0x16] = disk_id[0]
-            disk_image[header_offset + 0x17] = disk_id[1]
-            disk_image[header_offset + 0x18] = 0xA0
-            disk_image[header_offset + 0x19] = ord('3')
-            disk_image[header_offset + 0x1A] = ord('D')
-            disk_image[header_offset + 0x1B] = 0xA0
-            disk_image[header_offset + 0x1C] = 0xA0
+            h_offset = self._sector_offset(dir_tr, 0)
+            disk_image[h_offset + 0x00:h_offset + 0x04] = bytes([dir_tr, dir_sec, ord('D'), 0])
+            disk_image[h_offset + 0x04:h_offset + 0x14] = name_bytes
+            disk_image[h_offset + 0x14:h_offset + 0x1D] = bytes([
+                0xA0, 0xA0, disk_id[0], disk_id[1], 0xA0, ord('3'), ord('D'), 0xA0, 0xA0
+            ])
 
-            bam1_offset = self._sector_offset(self._geometry.directory_track, 1)
-            disk_image[bam1_offset + 0] = self._geometry.directory_track & 0xFF
-            disk_image[bam1_offset + 1] = 2
-            disk_image[bam1_offset + 2] = ord('D')
-            disk_image[bam1_offset + 3] = 0
-            disk_image[bam1_offset + 4] = disk_id[0]
-            disk_image[bam1_offset + 5] = disk_id[1]
-            disk_image[bam1_offset + 6] = ord('D')
-            disk_image[bam1_offset + 7] = 0
+            b1_offset = self._sector_offset(dir_tr, 1)
+            disk_image[b1_offset + 0x00:b1_offset + 0x08] = bytes([
+                dir_tr, 2, ord('D'), 0, disk_id[0], disk_id[1], ord('D'), 0
+            ])
 
-            bam2_offset = self._sector_offset(self._geometry.directory_track, 2)
-            disk_image[bam2_offset + 0] = 0
-            disk_image[bam2_offset + 1] = 0xFF
-            disk_image[bam2_offset + 2] = ord('D')
-            disk_image[bam2_offset + 3] = 0
-            disk_image[bam2_offset + 4] = disk_id[0]
-            disk_image[bam2_offset + 5] = disk_id[1]
-            disk_image[bam2_offset + 6] = ord('D')
-            disk_image[bam2_offset + 7] = 0
+            b2_offset = self._sector_offset(dir_tr, 2)
+            disk_image[b2_offset + 0x00:b2_offset + 0x08] = bytes([
+                0, 0xFF, ord('D'), 0, disk_id[0], disk_id[1], ord('D'), 0
+            ])
 
     def _locate_bam_entry(self, track: int) -> Tuple[int, int, int]:
         meta_track = self._geometry.directory_track
