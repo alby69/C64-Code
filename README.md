@@ -29,6 +29,10 @@ cd C64-Code
 pip install -e ".[test]"
 ```
 
+## Roadmap
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the project roadmap, future vision, and planned features.
+
 ## CLI Usage
 
 ```bash
